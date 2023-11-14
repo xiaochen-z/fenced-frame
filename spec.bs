@@ -21,6 +21,7 @@ WPT Display: open
 </pre>
 
 <pre class="link-defaults">
+spec:dom; type:dfn; for:/; text:element
 spec: url; for:/; type: dfn; text: url
 </pre>
 <pre class="biblio">
@@ -222,9 +223,12 @@ spec: permissions-policy; urlPrefix: https://w3c.github.io/webappsec-permissions
     text: ASCII-serialized policy directive; url: serialized-policy-directive
     text: serialized permissions policy; url: serialized-permissions-policy
     text: supported features; url: supported-features
-    text: declared policy; url: declared-policy
     text: the special value *; url: the-special-value
     text: permissions policy; url: permissions-policy
+    text: policy directive; url: policy-directive
+    for: permissions policy
+      text: declared policy; url: permissions-policy-declared-policy
+      text: inherited policy; url: permissions-policy-inherited-policy
     for: permissions
       text: matches; url: matches
 spec: CSP; urlPrefix: https://w3c.github.io/webappsec-csp/
@@ -237,14 +241,16 @@ spec: CSPEE; urlPrefix: https://w3c.github.io/webappsec-cspee/
   type: dfn
     text: Is response to request blocked by context's required CSP?; url: process-response
     text: required csp; url: browsing-context-required-csp
-spec: permissions-policy; urlPrefix: https://w3c.github.io/webappsec-permissions-policy
-  type: dfn
-    for: permissions policy
-      text: inherited policy; url: inherited-policy
 spec: css2; urlPrefix: https://www.w3.org/TR/CSS21/visuren.html
   type: dfn
     for: css2
       text: viewport; url: viewport
+spec: attribution-reporting; urlPrefix: https://wicg.github.io/attribution-reporting-api/
+  type: dfn
+    for: eligibility
+      text: event-source; url: eligibility-event-source
+      text: navigation-source; url: eligibility-navigation-source
+      text: unset; url: eligibility-unset
 </pre>
 
 <style>
@@ -679,18 +685,26 @@ A <dfn export for=fencedframetype>pending event</dfn> is a [=struct=] with the f
   : <dfn>destination</dfn>
   :: a {{FenceReportingDestination}}
 
-  : <dfn>eventType</dfn>
-  :: a [=string=]
+  : <dfn>event</dfn>
+  :: a [=fencedframetype/destination event=]
+</dl>
 
-  : <dfn>eventData</dfn>
-  :: a [=string=]
+A <dfn export for=fencedframetype>reporting destination info</dfn> is a [=struct=] with the
+following [=struct/items=]:
+
+<dl export dfn-for="reporting destination info">
+  : <dfn>reporting url map</dfn>
+  :: a [=map=] whose [=map/keys=] are [=strings=] and whose [=map/values=] are [=URLs=]
+
+  : <dfn>reporting macro map</dfn>
+  :: null, or a [=map=] whose [=map/keys=] are [=strings=] and whose [=map/values=] are [=strings=]
 </dl>
 
 A <dfn export for=fencedframetype>fenced frame reporting map</dfn> is a [=map=] whose [=map/keys=]
 are {{FenceReportingDestination}}s and whose [=map/values=] are either:
  * [=lists=] of [=fencedframetype/pending events=] (which are used to represent events that need to
    be reported asynchronously, because the metadata has not been finalized yet); or
- * [=maps=] whose [=map/keys=] are [=strings=] and whose [=map/values=] are [=urls=] (which are used
+ * [=fencedframetype/reporting destination infos=] (which are used
    to represent the actual metadata once it is finalized).
 
 Note: This representation is meant to allow config-generating APIs to reduce latency by resolving
@@ -707,21 +721,26 @@ be sent.
 
 <div algorithm>
   In order to <dfn export>finalize a reporting destination</dfn>, given a [=fencedframetype/fenced
-  frame reporting map=] |reporting map|, a {{FenceReportingDestination}} |destination|, and a
-  [=map=] |destination map| whose [=map/keys=] are [=strings=] and whose [=map/values=] are
-  [=urls=], run these steps:
+  frame reporting map=] |reporting map|, a {{FenceReportingDestination}} |destination|, a [=map=]
+  |destination map| whose [=map/keys=] are [=strings=] and whose [=map/values=] are [=urls=], and
+  |macro map|, which is either null or a [=map=] whose [=map/keys=] are [=strings=] and whose
+  [=map/values=] are [=strings=], run these steps:
 
   1. [=Assert=] that |reporting map|[|destination|] is a [=list=] (i.e., that |destination|'s
      metadata has not yet been finalized).
 
   1. Let |pending event list| be |reporting map|[|destination|].
 
-  1. [=map/Set=] |reporting map|[|destination|] to |destination map|.
+  1. [=map/Set=] |reporting map|[|destination|] to a [=struct=] with the following [=struct/items=]:
+       : [=reporting destination info/reporting url map=]
+       :: |destination map|
+
+       : [=reporting destination info/reporting macro map=]
+       :: |macro map|
 
   1. [=list/For each=] |pending event| of |pending event list|:
 
-     1. [=Send a beacon=] with |destination map|, |pending event|'s [=pending event/eventType=],
-        and |pending event|'s [=pending event/eventData=].
+     1. [=Send a beacon=] with |destination map| and |pending event|'s [=pending event/event=].
 </div>
 
 A <dfn export for=fencedframetype>fenced frame reporting metadata</dfn> is a [=struct=] with the
@@ -732,7 +751,38 @@ following [=struct/items=]:
   :: a [=fencedframetype/fenced frame reporting map=]
 
   : <dfn>direct seller is seller</dfn>
-  :: a boolean
+  :: a [=boolean=], initially true
+
+  : <dfn>allowed reporting origins</dfn>
+  :: null or a [=list=] of [=origins=]. An origin must be present in this list to be the
+     destination of a [=fencedframetype/destination URL event=] report.
+
+  : <dfn>attempted custom url report to disallowed origin</dfn>
+  :: a [=boolean=], initially false
+</dl>
+
+An <dfn for=fencedframetype>automatic beacon event type</dfn> is either "<dfn
+for="automatic beacon event type">`reserved.top_navigation_start`</dfn>", "<dfn
+for="automatic beacon event type">`reserved.top_navigation_commit`</dfn>", or "<dfn
+for="automatic beacon event type">`reserved.top_navigation`</dfn>".
+
+Advisement: <code>[=automatic beacon event type/reserved.top_navigation=]</code> is an earlier
+naming of <code>[=automatic beacon event type/reserved.top_navigation_commit=]</code>. While they
+both do the same thing, <code>[=automatic beacon event type/reserved.top_navigation=]</code> will be
+removed in the future and should not be used for new code.
+
+An <dfn for=fencedframetype>automatic beacon data</dfn> is a [=struct=] with the following
+[=struct/items=]:
+     
+<dl dfn-for="automatic beacon data">
+  : <dfn>eventData</dfn>
+  :: a [=string=]
+
+  : <dfn>destination</dfn>
+  :: a [=list=] of {{FenceReportingDestination}}s
+
+  : <dfn>once</dfn>
+  :: a [=boolean=]
 </dl>
 
 A <dfn export for=fencedframetype>fenced frame reporter</dfn> is a [=struct=] with the following
@@ -742,28 +792,103 @@ A <dfn export for=fencedframetype>fenced frame reporter</dfn> is a [=struct=] wi
   :: a mutable reference to a [=fencedframetype/fenced frame reporting metadata=]
      <span class=XXX>TODO: Handle pointers/references in a more spec-y way</span>
 
-  : <dfn>automatic beacon data</dfn>
-  :: null, or a [=struct=] with the following [=struct/items=]:
-     <dl dfn-for="automatic beacon data">
-       : <dfn>eventData</dfn>
-       :: a [=string=]
-
-       : <dfn>destination</dfn>
-       :: a [=list=] of {{FenceReportingDestination}}s
-
-       : <dfn>once</dfn>
-       :: a [=boolean=]
-     </dl>
+  : <dfn>automatic beacon data map</dfn>
+  :: a [=map=] whose [=map/keys=] are [=fencedframetype/automatic beacon event type=]s and whose
+     [=map/values=] are null or an [=fencedframetype/automatic beacon data=]
 </dl>
 
+A <dfn for=fencedframetype>destination enum event</dfn> is a [=struct=] with the following
+[=struct/items=]:
+<dl dfn-for="destination enum event">
+  : <dfn>type</dfn>
+  :: a [=string=]
+
+  : <dfn>data</dfn>
+  :: a [=string=]
+
+  : <dfn>attributionReportingEnabled</dfn>
+  :: a [=boolean=]
+
+  : <dfn>attributionReportingContextOrigin</dfn>
+  :: an [=origin=]
+</dl>
+
+A <dfn for=fencedframetype>destination URL event</dfn> is a [=URL=].
+
+An <dfn for=fencedframetype>automatic beacon event</dfn> is a [=struct=] with the following
+[=struct/items=]:
+<dl dfn-for="automatic beacon event">
+  : <dfn>type</dfn>
+  :: an [=fencedframetype/automatic beacon event type=]
+
+  : <dfn>data</dfn>
+  :: a [=string=]
+
+  : <dfn>attributionReportingEnabled</dfn>
+  :: a [=boolean=]
+
+  : <dfn>attributionReportingContextOrigin</dfn>
+  :: an [=origin=]
+</dl>
+
+A <dfn for=fencedframetype>destination event</dfn> is either a
+[=fencedframetype/destination enum event=], a [=fencedframetype/destination URL event=], or a
+[=fencedframetype/automatic beacon event=].
+
 <div algorithm>
-  In order to <dfn>send a beacon</dfn> with a [=map=] |destination map| whose [=map/keys=] are
-  [=strings=] and whose [=map/values=] are [=urls=], a [=string=] |eventType|, and a [=string=]
-  |eventData|, run these steps:
+  In order to <dfn>send a beacon</dfn> with a [=fencedframetype/reporting destination info=]
+  |destination info| and a [=fencedframetype/destination event=] |event|, run these steps:
 
-  1. If |destination map|[|eventType|] does not [=map/exist=], return.
+  1. Let |destination url| be an empty [=string=].
 
-  1. Let |destination url| be |destination map|[|eventType|].
+  1. Let |attributionReportingEligibility| be "<code>[=eligibility/unset=]</code>".
+
+  1. Let |processResponse| be null.
+
+  1. Let |useParallelQueue| be false.
+
+  1. If |event| is either a [=fencedframetype/destination enum event=] or an
+     [=fencedframetype/automatic beacon event=], then:
+
+     1. Let |destination map| be |destination info|'s
+        [=reporting destination info/reporting url map=].
+
+     1. Let |eventType| be either |event|'s [=destination enum event/type|destination type=], or
+        [=automatic beacon event/type|automatic type=], depending on which variant |event| is.
+
+     1. If |destination map|[|eventType|] does not [=map/exist=], return.
+
+     1. Set |destination url| to |destination map|[|eventType|].
+
+    1. If |event|'s [=destination enum event/attributionReportingEnabled=] is true and the result
+       of [=getting supported registrars=] is not [=list/is empty|empty=] and |event|'s
+       [=destination enum event/attributionReportingContextOrigin=] [=check if an origin is suitable|is suitable=]:
+
+        1. If |event|'s {{FenceEvent/eventType}} matches one of the [=fencedframetype/automatic
+           beacon event type=] values, set |attributionReportingEligibility| to
+           "<code>[=eligibility/navigation-source=]</code>".
+
+        1. Otherwise, set |attributionReportingEligibility| to "<code>[=eligibility/event-source=]</code>".
+
+        1. Set |processResponse| to these steps given a [=response=] |response|:
+
+           1. Run [=process an attribution eligible response=] with |event|'s
+              [=destination enum event/attributionReportingContextOrigin=], |attributionReportingEligibility|, and |response|.
+
+        1. Set |useParallelQueue| to true.
+
+  1. Otherwise:
+
+     1. [=Assert=]: |event| is a [=fencedframetype/destination URL event=].
+
+     1. Let |macro map| be |destination info|'s [=reporting destination info/reporting macro map=].
+
+     1. If |macro map| is null, return.
+
+     1. Set |destination url| to |event|.
+
+     1. Let |destination url| be the result of [=fencedframeutil/substituting macros=] with
+        |macro map| into |destination url|.
   
   1. Optionally, return.
 
@@ -774,7 +899,8 @@ A <dfn export for=fencedframetype>fenced frame reporter</dfn> is a [=struct=] wi
   1. Let |request| be a new [=request=] with the following properties:
 
     : [=request/method=]
-    :: <code>`POST`</code>
+    :: <code>`POST`</code> if |event| is a [=fencedframetype/destination enum event=], otherwise
+       <code>`GET`</code>.
 
     : [=request/URL=]
     :: |destination url|
@@ -784,7 +910,8 @@ A <dfn export for=fencedframetype>fenced frame reporter</dfn> is a [=struct=] wi
        [=header/value=] is `"text/plain"`.
 
     : [=request/body=]
-    :: A [=body=] whose [=body/source=] is |eventData|.
+    :: If |event| is a [=fencedframetype/destination enum event=], a [=body=] whose [=body/source=]
+       is |event|'s [=destination enum event/data=], otherwise null.
 
     : [=request/client=]
     :: null
@@ -810,30 +937,47 @@ A <dfn export for=fencedframetype>fenced frame reporter</dfn> is a [=struct=] wi
     : [=request/credentials mode=]
     :: `"omit"`
 
-  1. [=Fetch=] |request|.
+    : [=request/Attribution Reporting eligibility=]
+    :: |attributionReportingEligibility|
+
+  1. [=Fetch=] |request| with [=fetch/processResponse=] being |processResponse| if it is not null
+     and [=fetch/useParallelQueue=] being |useParallelQueue|.
 
     Note: This algorithm can be invoked from while [=in parallel=] or while on a {{Document}}'s main
-    thread. To handle the [=in parallel=] invocation correctly, ordinarily we would invoke [=fetch=]
-    with [=fetch/useParallelQueue=] set to true, but since we don't pass in any of the <span
-    class=allow-2119>optional</span> [=response=]-handling algorithms, there is no need to do this.
+    thread. To handle the [=in parallel=] invocation correctly, we invoke [=fetch=]
+    with [=fetch/useParallelQueue=] set to true when the <span class=allow-2119>optional</span>
+    [=response=]-handling algorithm is used, otherwise there is no need to do this even when this
+    algorithm is running [=in parallel=] in other instances.
 </div>
 
 <div algorithm>
   In order to <dfn>report an event</dfn> using a [=fencedframetype/fenced frame reporter=]
-  |reporter| with a {{FenceReportingDestination}} |destination|, [=string=] |eventType|, and
-  [=string=] |eventData|, run these steps:
+  |reporter| with a {{FenceReportingDestination}} |destination|, and a
+  [=fencedframetype/destination event=] |event|, run these steps:
+
+  1. Let |metadata| be |reporter|'s
+     [=fenced frame reporter/fenced frame reporting metadata reference=].
 
   1. If |destination| is `"direct-seller"`:
 
-     1. If |reporter|'s [=fenced frame reporter/fenced frame reporting metadata reference=]'s
-        [=fenced frame reporting metadata/direct seller is seller=] is true, set |destination| to
-        `"seller"`.
+     1. If |metadata|'s [=fenced frame reporting metadata/direct seller is seller=] is true, set
+        |destination| to `"seller"`.
 
      1. Otherwise, set |destination| to `"component-seller"`.
 
-  1. Let |reporting map| be a reference to |reporter|'s [=fenced frame reporter/fenced frame
-     reporting metadata reference=]'s [=fenced frame reporting metadata/fenced frame reporting
-     map=].
+  1. If |event| is a [=fencedframetype/destination URL event=]:
+     1. If |event|'s [=url/origin=] is not [=same origin=] with any of the entries in
+        |metadata|'s [=fenced frame reporting metadata/allowed reporting origins=]:
+        1. Set |metadata|'s
+           [=fenced frame reporting metadata/attempted custom url report to disallowed origin=] to
+           true.
+
+     1. If |metadata|'s
+        [=fenced frame reporting metadata/attempted custom url report to disallowed origin=] is
+        true, return.
+
+  1. Let |reporting map| be a reference to |metadata|'s
+     [=fenced frame reporting metadata/fenced frame reporting map=].
 
   1. If |reporting map|[|destination|] does not [=map/exist=], return.
 
@@ -843,11 +987,8 @@ A <dfn export for=fencedframetype>fenced frame reporter</dfn> is a [=struct=] wi
         : [=pending event/destination=]
         :: |destination|
 
-        : [=pending event/eventType=]
-        :: |eventType|
-
-        : [=pending event/eventData=]
-        :: |eventData|
+        : [=pending event/event=]
+        :: |event|
 
      1. [=list/Append=] |newEvent| to |reporting map|[|destination|].
 
@@ -858,7 +999,7 @@ A <dfn export for=fencedframetype>fenced frame reporter</dfn> is a [=struct=] wi
   1. [=Assert=] that |reporting map|[|destination|] is a [=map=] (i.e. that |destination|'s
      metadata has been finalized).
 
-  1. [=Send a beacon=] with |reporting map|[|destination|], |eventType|, and |eventData|.
+  1. [=Send a beacon=] with |reporting map|[|destination|] and |event|.
 </div>
 
 <div algorithm>
@@ -983,7 +1124,17 @@ A <dfn export>fenced frame config</dfn> is a [=struct=] with the following [=str
 
   : <dfn>embedder shared storage context</dfn>
   :: null, or a [=string=]
+  
+  : <dfn>is ad component</dfn>
+  :: A [=boolean=]. Defaulting to false.
 </dl>
+  
+  Note: When true, this [=fenced frame config=] reprsents an ad component. An ad component can be
+  used to construct ads composed of multiple pieces. See the <a
+  href=https://github.com/WICG/turtledove/blob/main/FLEDGE.md#34-ads-composed-of-multiple-pieces>Protected
+  Audience explainer</a>. For an ad component, event reporting is handled differently. See the <a
+  href=https://github.com/WICG/turtledove/blob/main/Fenced_Frames_Ads_Reporting.md#support-for-ad-components>Fenced
+  Frame Ads Reporting explainer</a> that describes this.
 
 <h4 id=fenced-frame-config-instance-struct>The [=fenced frame config instance=] [=struct=]</h4>
 
@@ -1026,6 +1177,9 @@ A <dfn export>fenced frame config instance</dfn> is a [=struct=] with the follow
 
   : <dfn>embedder shared storage context</dfn>
   :: null, or a [=string=]
+  
+  : <dfn>is ad component</dfn>
+  :: A [=boolean=], initially false.
 </dl>
 
 <div algorithm>
@@ -1070,8 +1224,8 @@ A <dfn export>fenced frame config instance</dfn> is a [=struct=] with the follow
             :: a reference to |config|'s [=fenced frame config/fenced frame reporting metadata=]'s
                [=fenced frame reporting metadata/value=]
 
-            : [=fenced frame reporter/automatic beacon data=]
-            :: null
+            : [=fenced frame reporter/automatic beacon data map=]
+            :: an empty [=map=]
 
     : [=fenced frame config instance/exfiltration budget metadata reference=]
     ::
@@ -1110,6 +1264,9 @@ A <dfn export>fenced frame config instance</dfn> is a [=struct=] with the follow
 
     : [=fenced frame config instance/embedder shared storage context=]
     :: |config|'s [=fenced frame config/embedder shared storage context=]
+    
+    : [=fenced frame config instance/is ad component=]
+    :: |config|'s [=fenced frame config/is ad component=]
 </div>
 
 Each [=browsing context=] has a <dfn for="browsing context">fenced frame config instance</dfn>,
@@ -1317,18 +1474,27 @@ Several APIs specific to fenced frames are defined on the {{Fence}} interface.
   };
 
   dictionary FenceEvent {
-    required DOMString eventType;
-    required DOMString eventData;
-    required sequence&lt;FenceReportingDestination&gt; destination;
+    // This dictionary has two mutually exclusive modes that aren't represented as
+    // distinct IDL types due to distinguishability issues:
+    //
+    // When reporting to a preregistered destination (specified by enum), the following
+    // properties are used:
+    DOMString eventType;
+    DOMString eventData;
+    sequence&lt;FenceReportingDestination&gt; destination;
     boolean once = false;
+
+    // When reporting to a custom destination URL (with substitution of macros defined by
+    // the Protected Audience buyer), the following property is used:
+    USVString destinationURL;
   };
 
   typedef (FenceEvent or DOMString) ReportEventType;
 
   [Exposed=Window]
   interface Fence {
-      undefined reportEvent(ReportEventType event);
-      undefined setReportEventDataForAutomaticBeacons(FenceEvent event);
+      undefined reportEvent(optional ReportEventType event = {});
+      undefined setReportEventDataForAutomaticBeacons(optional FenceEvent event = {});
       sequence&lt;FencedFrameConfig&gt; getNestedConfigs();
   };
 </pre>
@@ -1350,22 +1516,73 @@ Several APIs specific to fenced frames are defined on the {{Fence}} interface.
   1. If |event| is a {{DOMString}}, run [=report a private aggregation event=] using |instance|'s
      [=fenced frame config instance/fenced frame reporter=] with |event|.
 
-  1. If |event| is a {{FenceEvent}}, [=list/for each=] |destination| of |event|'s {{FenceEvent/destination}}:
+  1. If |event| is a {{FenceEvent}}:
 
-     1. Run [=report an event=] using |instance|'s [=fenced frame config instance/fenced frame
-        reporter=] with |destination|, |event|'s {{FenceEvent/eventType}}, and |event|'s
-        {{FenceEvent/eventData}}.
+     1. If |event| has a {{FenceEvent/destinationURL}}:
+        1. If |event| has a {{FenceEvent/destination}} or a {{FenceEvent/eventType}} or a
+           {{FenceEvent/eventData}}:
+
+           1. [=exception/Throw=] a {{TypeError}}.
+
+        1. Let |destinationURL| be the result of running the [=URL parser=] on
+           {{FenceEvent/destinationURL}}.
+
+        1. [=exception/Throw=] a {{TypeError}} if any of the following conditions hold:
+
+           * |destinationURL| is failure;
+           * |destinationURL| [=url/scheme=] is not "`https`";
+
+        1. Run [=report an event=] using |instance|'s [=fenced frame config instance/fenced frame
+           reporter=] with {{FenceReportingDestination/buyer}} and a
+           [=fencedframetype/destination URL event=] that is |event|'s
+           {{FenceEvent/destinationURL}}.
+
+     1. Otherwise:
+        1. If |event| does not have a {{FenceEvent/destination}} or |event| does not have a
+           {{FenceEvent/eventType}}:
+
+           1. [=exception/Throw=] a {{TypeError}}.
+
+        1. Let |document| be [=this=]'s [=relevant global object=]'s [=associated Document=].
+
+        1. Let |attributionReportingEnabled| be the result of determining whether |document| is
+           [=allowed to use=] the "<code>{{PermissionPolicy/attribution-reporting}}</code>" feature.
+
+        1. Let |attributionReportingContextOrigin| be |document|'s [=node/context origin=].
+
+        1. [=list/For each=] |destination| of |event|'s {{FenceEvent/destination}}:
+
+          1. Run [=report an event=] using |instance|'s [=fenced frame config instance/fenced frame
+             reporter=] with |destination| and a [=fencedframetype/destination enum event=] with the
+             following [=struct/items=]:
+
+             : [=destination enum event/type=]
+             :: |event|'s {{FenceEvent/eventType}}
+
+             : [=destination enum event/data=]
+             :: |event|'s {{FenceEvent/eventData}} (or the empty string if it is not defined).
+
+           : [=destination enum event/attributionReportingEnabled=]
+           :: |attributionReportingEnabled|
+
+           : [=destination enum event/attributionReportingContextOrigin=]
+           :: |attributionReportingContextOrigin|
 
   <wpt>
     /fenced-frame/fence-report-event.https.html
+    /fenced-frame/fence-report-event-destination-url.https.html
   </wpt>
 </div>
 
 <div algorithm>
   The <dfn method for=Fence>setReportEventDataForAutomaticBeacons(|event|)</dfn>
   method steps are:
+  1. If |event| does not have a {{FenceEvent/destination}} or |event| does not have a
+     {{FenceEvent/eventType}}:
+     1. [=exception/Throw=] a {{TypeError}}.
 
-  1. If |event|'s {{FenceEvent/eventType}} is not `"reserved.top_navigation"`, return.
+  1. If |event|'s {{FenceEvent/eventType}} does not match one of the [=fencedframetype/automatic
+     beacon event type=] values, return.
 
   1. Let |instance| be [=this=]'s [=relevant global object=]'s [=Window/browsing context=]'s
      [=browsing context/fenced frame config instance=].
@@ -1379,10 +1596,11 @@ Several APIs specific to fenced frames are defined on the {{Fence}} interface.
   1. If |instance|'s [=fenced frame config instance/fenced frame reporter=] is null, then return.
 
   1. Set |instance|'s [=fenced frame config instance/fenced frame reporter=]'s [=fenced frame
-     reporter/automatic beacon data=] to a [=struct=] with the following [=struct/items=]:
+     reporter/automatic beacon data map=][|event|'s {{FenceEvent/eventType}}] to an
+     [=fencedframetype/automatic beacon data=] with the following [=struct/items=]:
 
      : [=automatic beacon data/eventData=]
-     :: |event|'s {{FenceEvent/eventData}}
+     :: |event|'s {{FenceEvent/eventData}} if defined, otherwise empty string
 
      : [=automatic beacon data/destination=]
      :: |event|'s {{FenceEvent/destination}}
@@ -1493,17 +1711,17 @@ table](https://fetch.spec.whatwg.org/#destination-table) to illustrate that <{fe
 A side effect of the fenced boundary model is that ads will lose the ability to know if a click
 resulted in a successful navigation. This is because the page loaded from a top-level [=navigate|
 navigation=] originating from a fenced frame will not be allowed to report to the fenced frame that
-it loaded (through something like <code>window.[=Window/opener=]</code>). Instead, we introduce a
-special event-level [=pending event/eventType|reporting type=], `reserved.top_navigation`, which
-automatically sends an [=report an event|event-level beacon=] when a fenced frame initiates a
-successful [=navigate|navigation=] to a [=top-level traversable=].
+it loaded (through something like <code>window.[=Window/opener=]</code>). Instead, we introduce
+special event-level [=automatic beacon event/type|reporting type=]s, <code>[=automatic beacon event
+type/reserved.top_navigation_start=]</code> and <code>[=automatic beacon event
+type/reserved.top_navigation_commit=]</code>, which automatically sends an [=report an
+event|event-level beacon=] when a fenced frame initiates a successful [=navigate|navigation=] to a
+[=top-level traversable=].
 
 <div algorithm>
   To <dfn>attempt to send an automatic beacon</dfn> given a [=source snapshot params=]
-  |sourceSnapshotParams|, an [=origin=] |sourceOrigin|, a {{Document}} |targetDocument|, and a
-  [=string=] |eventType|, run these steps:
-
-  1. [=Assert=]: |eventType| is "`reserved.top_navigation`".
+  |sourceSnapshotParams|, an [=origin=] |sourceOrigin|, a {{Document}} |targetDocument|, and an
+  [=fencedframetype/automatic beacon event type=] |eventType|, run these steps:
 
   1. If |targetDocument|'s [=node navigable=]'s [=traversable navigable=] is not a [=top-level
      traversable=], abort these steps.
@@ -1515,44 +1733,78 @@ successful [=navigate|navigation=] to a [=top-level traversable=].
      instance=].
 
   1. If |config| is null, abort these steps.
-     
+
      Note: Since this algorithm is called unconditionally for all navigations, this is used to catch
      cases where a [=navigate|navigation=] to a [=top-level traversable=] does not originate from a
      <{fencedframe}>.
 
   1. Let |beacon data| be |config|'s [=fenced frame config instance/fenced frame reporter=]'s
-     [=fenced frame reporter/automatic beacon data=].
+     [=fenced frame reporter/automatic beacon data map=][|eventType|].
 
   1. If |beacon data| is null, abort these steps.
 
   1. If |sourceOrigin| is not [=same origin=] with |config|'s [=fenced frame config instance/mapped
      url=]'s [=url/origin=], abort these steps.
 
-  1. [=list/For each=] |destination| of |beacon data|'s [=automatic beacon data/destination=]:
+  1. [=list/For each=] |destination| of |config|'s [=fenced frame config instance/fenced frame
+     reporter=]'s [=fenced frame reporter/fenced frame reporting metadata reference=]'s
+     [=fencedframetype/fenced frame reporting map=]'s [=map/keys=]:
 
     1. Run [=report an event=] using |config|'s [=fenced frame config instance/fenced frame
-       reporter=] with |destination|, |eventType|, and |beacon data|'s [=automatic beacon data/
-       eventData=].
+       reporter=] with |destination| and an [=fencedframetype/automatic beacon event=] with the
+       following [=struct/items=]:
+
+       : [=automatic beacon event/type=]
+       :: |eventType|
+
+       : [=automatic beacon event/data=]
+       :: |beacon data|'s [=automatic beacon data/eventData=] if |beacon data|'s [=automatic beacon
+          data/destinations=] [=list/contains=] |destination|, the empty string otherwise.
+
+       : [=automatic beacon event/attributionReportingEnabled=]
+       :: |sourceSnapshotParams|'s [=source snapshot params/attribution reporting enabled=]
+
+       : [=automatic beacon event/attributionReportingContextOrigin=]
+       :: |sourceSnapshotParams|'s [=source snapshot params/attribution reporting context origin=]
 
   1. If |beacon data|'s [=automatic beacon data/once=] is true, set |config|'s [=fenced frame
-      config instance/fenced frame reporter=]'s [=fenced frame reporter/automatic beacon data=] to
-      null.
+      config instance/fenced frame reporter=]'s [=fenced frame reporter/automatic beacon data
+      map=][|eventType|] to null.
 
   <wpt>
+    /fenced-frame/automatic-beacon-anchor-click-handler.https.html
     /fenced-frame/automatic-beacon-click-handler.https.html
     /fenced-frame/automatic-beacon-two-events-clear.https.html
     /fenced-frame/automatic-beacon-two-events-persist.https.html
     /fenced-frame/automatic-beacon-unfenced-top.https.html
+    /fenced-frame/automatic-beacon-no-destination.https.html
+    /fenced-frame/automatic-beacon-no-opt-in.https.html
   </wpt>
 </div>
 
-<div algorithm="automatic beacon patch">
+<div algorithm="top_navigation_start beacon patch">
+  Modify [[HTML]]'s [=navigate=] algorithm. Add a new step after step 4 that reads:
+  
+  5. [=Attempt to send an automatic beacon=] given <var ignore>sourceSnapshotParams</var>, <var
+     ignore>initiatorOriginSnapshot</var>, <var ignore>navigable</var>’s associated {{Document}},
+     and <code>[=automatic beacon event type/reserved.top_navigation_start=]</code>.
+</div>
+
+<div algorithm="top_navigation_commit beacon patch">
   Modify [[HTML]]'s [=attempt to populate the history entry's document=] algorithm. In step 6,
   substep 11, add a new step after step 5 that reads:
 
-  6. if <var ignore>failure</var> is false, then [=attempt to send an automatic beacon=] given <var
-     ignore>sourceSnapshotParams</var>, <var ignore>entry</var>'s [=document state=]'s [=document
-     state/initiator origin=], <var ignore>document</var>, and "`reserved.top_navigation`".
+  6. If <var ignore>failure</var> is false, then:
+    
+    1. [=Attempt to send an automatic beacon=] given <var
+       ignore>sourceSnapshotParams</var>, <var ignore>entry</var>'s [=document state=]'s [=document
+       state/initiator origin=], <var ignore>document</var>, and <code>[=automatic beacon event
+       type/reserved.top_navigation_commit=]</code>.
+    
+    1. [=Attempt to send an automatic beacon=] given <var
+       ignore>sourceSnapshotParams</var>, <var ignore>entry</var>'s [=document state=]'s [=document
+       state/initiator origin=], <var ignore>document</var>, and <code>[=automatic beacon event
+       type/reserved.top_navigation=]</code>.
 </div>
 
 <h2 id=html-integration>HTML Integration</h2>
@@ -2195,7 +2447,7 @@ CORP violation report=] algorithm, as leaving it unfenced may cause a privacy le
 <h4 id=navigation-changes>Actual navigation changes</h4>
 
 <div algorithm=source-snapshot-param-config>
-  Add two new [=struct/item=]s to the [=source snapshot params=] [=struct=]:
+  Add four new [=struct/item=]s to the [=source snapshot params=] [=struct=]:
 
   : <dfn for="source snapshot params">initiator fenced frame config instance</dfn>
   :: a [=fenced frame config instance=] or null, initially null.
@@ -2203,10 +2455,16 @@ CORP violation report=] algorithm, as leaving it unfenced may cause a privacy le
   : <dfn for="source snapshot params">target fenced frame config</dfn>
   :: a [=fenced frame config=] or null, initially null.
 
+  : <dfn for="source snapshot params">attribution reporting enabled</dfn>
+  :: a [=boolean=].
+
+  : <dfn for="source snapshot params">attribution reporting context origin</dfn>
+  :: an [=origin=].
+
   Note: The [=source snapshot params/initiator fenced frame config instance=] is the [=fenced frame
   config instance=] that's loaded into a navigation initiator's [=browsing context=], if any exists.
   It is used by the [=attempt to send an automatic beacon=] algorithm to retrieve the [=fenced frame
-  reporter/automatic beacon data=] to be sent out if the <{fencedframe}>-initiated navigation
+  reporter/automatic beacon data map=] to be sent out if the <{fencedframe}>-initiated navigation
   succeeds. The [=source snapshot params/target fenced frame config=] on the other hand, is the
   non-[=instantiate a config|instantiated=] [=fenced frame config=] that will be loaded into a a
   <{fencedframe}> element for navigations targeting fenced frames. These fields do not interact
@@ -2215,11 +2473,19 @@ CORP violation report=] algorithm, as leaving it unfenced may cause a privacy le
 
 <div algorithm=snapshot-source-snapshot-params>
   Modify the [=snapshot source snapshot params=] algorithm to return a [=source snapshot params=]
-  with an additional field:
+  with three additional fields:
 
   : [=source snapshot params/initiator fenced frame config instance=]
-  :: <var ignore>sourceDocument</var>'s [=browsing context=]'s [=browsing context/fenced frame
+  :: |sourceDocument|'s [=browsing context=]'s [=browsing context/fenced frame
      config instance=]
+
+  : [=source snapshot params/attribution reporting enabled=]
+  :: The result of determining whether |sourceDocument| is [=allowed to use=] the
+     "<code>{{PermissionPolicy/attribution-reporting}}</code>" feature
+
+  : [=source snapshot params/attribution reporting context origin=]
+  :: |sourceDocument|'s [=node/context origin=]
+
 </div>
 
 <div algorithm=navigate>
@@ -2659,25 +2925,62 @@ algorithms to achieve the outcomes described in the above explanatory content.
   or <{fencedframe}>'s [=container policy=], when it is constructed.
 </div>
 
+<div algorithm>
+  Create a new algorithm, called <dfn>Derive a permissions policy directly from a fenced frame
+  config instance</dfn>.
+
+  Given null or an [=element=] (|container|), this algorithm returns a new [=permissions policy=].
+
+  1. Let |inherited policy| be a new [=ordered map=].
+
+  1. Let |effective permissions| be an empty [=list=].
+  
+  1. Let |fenced frame config| be |container|'s [=Node/node document=]'s [=navigable/active browsing
+     context=]'s [=browsing context/fenced frame config instance=].
+
+  1. If |fenced frame config| is not null, and |fenced frame config|'s [=fenced frame config/
+     effective enabled permissions=] are not null, set |effective permissions| to
+     |fenced frame config|'s [=fenced frame config/effective enabled permissions=].
+
+  1. [=list/For each=] |feature| [=supported features|supported=]:
+
+    1. If |effective permissions| [=list/contains=] |feature|, then set |inherited policy|[feature]
+       to "`Enabled`".
+       
+       Otherwise, set |inherited policy|[feature] to "`Disabled`".
+
+  1. Let |policy| be a new [=permissions policy=], with [=permissions policy/inherited policy=]
+     |inherited policy| and [=permissions policy/declared policy=] a new [=ordered map=].
+
+  1. Return |policy|.
+
+  Note: While this algorithm doesn't take the <{fencedframe/allow}> attribute into consideration, it
+  will have already been checked by the time this is called because of [=Should navigation response
+  to navigation request be blocked by Permissions Policy?=]. Any policy specified in
+  <{fencedframe/allow}> that is too restrictive would have cause the fenced frame to not load, and
+  any policy that is more permissive than what is specified in the [=fenced frame config/effective
+  enabled permissions=] will be ignored.
+</div>
+
 <div algorithm=create-permissions-policy>
   Modify the [$Create a Permissions Policy for a navigable$] algorithm:
 
-  Given null or an element (|container|), an [=origin=] (|origin|), and an optional [=boolean=]
-  |fenced| that defaults to false, this algorithm returns a new Permissions Policy.
+  Given null or an [=element=] (|container|), an [=origin=] (|origin|), and an optional [=boolean=]
+  |fenced| that defaults to false, this algorithm returns a new [=permissions policy=].
 
   Rewrite step 1 to read:
 
-  1. [=Assert=]: if not null, <var ignore>container</var> is either a [=navigable container=] or a
+  1. [=Assert=]: if not null, |container| is either a [=navigable container=] or a
      [=fenced navigable container=].
 
   Rewrite step 3 to read:
 
-  4. For each |feature| [=supported features|supported=]:
+  4. [=list/For each=] |feature| [=supported features|supported=]:
 
      1. Let |isInherited| be the result of running [$Define an inherited policy for feature in
         container at origin$] on |feature|, |container|, |origin|, and |fenced|.
 
-     2. Set <var ignore>inherited policy</var>[|feature|] to |isInherited|.
+     1. Set <var ignore>inherited policy</var>[|feature|] to |isInherited|.
 </div>
 
 <div algorithm=create-permissions-policy-response>
@@ -2685,16 +2988,22 @@ algorithms to achieve the outcomes described in the above explanatory content.
 
   Given null, a [=navigable container=]-or-[=fenced navigable container=] (|container|), an
   [=origin=] (|origin|), and a [=response=] (<var ignore>response</var>), this algorithm returns a
-  new [=Document/permissions policy=].
+  new [=permissions policy=].
 
-  Add a step before step 1 that reads:
+  Rewrite step 1 to read:
 
-  1. Let |fenced| be true if |container| is a [=fenced navigable container=], and false otherwise.
+  1. If |container| is a [=fenced navigable container=], then let |policy| be the result of running
+     [=derive a permissions policy directly from a fenced frame config instance=] given |container|.
 
-  Modify what is *now* step 2 of the algorithm to read:
+     Otherwise, Let |policy| be the result of running [$Create a Permissions Policy for a
+     navigable$] given |container| and |origin|.
+</div>
 
-  2. Let <var ignore>policy</var> be the result of running [$Create a Permissions Policy
-     for a navigable$] given |container|, |origin|, and |fenced|.
+<div algorithm=process-permissions-policy-attribute-patch>
+  Modify step 1 of the [$Process permissions policy attributes$] algorithm to read:
+
+  1. If <var ignore>element</var> is not an <{iframe}> element or a <{fencedframe}> element, then
+     return an empty [=policy directive=].
 </div>
 
 <div algorithm=attempt-populate-history-patches>
@@ -2737,11 +3046,18 @@ algorithms to achieve the outcomes described in the above explanatory content.
      creating a permissions policy$] given |navigable|'s [=fenced navigable container=], |origin|,
      and <var ignore>fenced</var> set to true.
 
-     Note: This is identical to the [=Document/permissions policy=] that will be created when the
-     navigation constructs the ultimate {{Document}} for this pending navigation. We create it now
-     and run tests on it since this is the appropriate time to determine if a navigation will fail,
-     and then throw it away. If the navigation succeeds, it will be recreated identically and
-     unconditionally installed on the {{Document}}.
+     Note: This is almost identical to the [=permissions policy=] that will be [=derive a
+     permissions policy directly from a fenced frame config instance|created=] when the navigation
+     constructs the ultimate {{Document}} for this pending navigation. The difference is that this
+     algorithm, just like when it is called on iframes, will include all of the permissions
+     specified in the <{fencedframe/allow}> attribute, even if that permission isn't specified in
+     the [=fenced frame config=]'s [=fenced frame config/effective enabled permissions=]. We create
+     it now and run tests on it since this is the appropriate time to determine if a navigation will
+     fail, and then throw it away. If the navigation succeeds, it will be recreated and
+     unconditionally installed on the {{Document}}. However, the recreation will not include any
+     additional enabled permissions that are not included in the [=fenced frame config/effective
+     enabled permissions=], effectively locking the enabled permissions to only what is specified in
+     [=fenced frame config/effective enabled permissions=].
 
   1. Let |inherited policy| be |permissions policy|'s [=permissions policy/inherited policy=].
 
@@ -2786,15 +3102,15 @@ algorithms to achieve the outcomes described in the above explanatory content.
 
   Rewrite step 3 to read:
 
-  3. If |feature| is present in |policy|'s [=declared policy=],
+  3. If |feature| is present in |policy|'s [=permissions policy/declared policy=],
 
-    1. If |fenced| is false, and the [=allowlist=] for |feature| in |policy|'s [=declared policy=]
-       [=permissions/matches=] |origin|, then return "`Enabled`".
+    1. If |fenced| is false, and the [=allowlist=] for |feature| in |policy|'s [=permissions policy/
+       declared policy=] [=permissions/matches=] |origin|, then return "`Enabled`".
 
-    2. Otherwise, if |fenced| is true, and the [=allowlist=] for |feature| in |policy|'s [=declared
-       policy=] is [=the special value *=], then return "`Enabled`".
+    1. Otherwise, if |fenced| is true, and the [=allowlist=] for |feature| in |policy|'s
+       [=permissions policy/declared policy=] is [=the special value *=], then return "`Enabled`".
 
-    3. Otherwise, return "`Disabled`".
+    1. Otherwise, return "`Disabled`".
 
   Rewrite step 5 to read:
 
